@@ -1,17 +1,36 @@
-namespace IncidentHub.Api.Domain;
+using System;
 
-public enum IncidentSeverity { Low = 1, Medium = 2, High = 3, Critical = 4 }
-public enum IncidentStatus { Open = 1, Acknowledged = 2, Resolved = 3 }
-
-public class Incident
+namespace IncidentHub.Api.Domain
 {
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public string Title { get; set; } = default!;
-    public string? Description { get; set; }
-    public IncidentSeverity Severity { get; set; } = IncidentSeverity.Low;
-    public IncidentStatus Status { get; set; } = IncidentStatus.Open;
-    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
-    public DateTimeOffset? AcknowledgedAt { get; set; }
-    public DateTimeOffset? ResolvedAt { get; set; }
-    public string? Assignee { get; set; }
+    public enum SeverityLevel
+    {
+        Low = 0,
+        Medium = 1,
+        High = 2,
+        Critical = 3
+    }
+
+    public enum StatusType
+    {
+        Open = 0,
+        Acknowledged = 1,
+        Resolved = 2
+    }
+
+    public class Incident
+    {
+        public Guid Id { get; set; } = Guid.NewGuid();
+        public string Title { get; set; } = string.Empty;
+        public string? Description { get; set; }
+
+        // Enum-based fields
+        public SeverityLevel Severity { get; set; } = SeverityLevel.Low;
+        public StatusType Status { get; set; } = StatusType.Open;
+
+        public string? Assignee { get; set; }
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? AcknowledgedAt { get; set; }
+        public DateTime? ResolvedAt { get; set; }
+    }
 }

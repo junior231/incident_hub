@@ -22,7 +22,6 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-
 // ---- CORS (allow your Next.js dev server) ----
 builder.Services.AddCors(o =>
 {
@@ -44,7 +43,6 @@ app.UseSwaggerUI(c =>
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "IncidentHub API v1");
     c.RoutePrefix = "swagger"; // so UI is at /swagger
 });
-
 
 // Keep dev simple: stay on HTTP to avoid the HTTPS warning
 // app.UseHttpsRedirection();
@@ -69,7 +67,7 @@ app.MapGet("/incidents", async (AppDbContext db, int page = 1, int pageSize = 20
 
     var dtos = items.Select(i => new IncidentDto(
         i.Id, i.Title, i.Description, i.Severity, i.Status,
-        i.CreatedAt, i.AcknowledgedAt, i.ResolvedAt, i.Assignee));
+        i.Assignee, i.CreatedAt, i.AcknowledgedAt, i.ResolvedAt));
 
     return Results.Ok(new { total, page, pageSize, items = dtos });
 });
@@ -81,11 +79,11 @@ app.MapGet("/incidents/{id:guid}", async (AppDbContext db, Guid id) =>
     return i is null
         ? Results.NotFound()
         : Results.Ok(new IncidentDto(i.Id, i.Title, i.Description, i.Severity, i.Status,
-            i.CreatedAt, i.AcknowledgedAt, i.ResolvedAt, i.Assignee));
+            i.Assignee, i.CreatedAt, i.AcknowledgedAt, i.ResolvedAt));
 });
 
 // Create
-app.MapPost("/incidents", async (AppDbContext db, CreateIncidentRequest req) =>
+app.MapPost("/incidents", async (AppDbContext db, CreateIncidentDto req) =>
 {
     if (string.IsNullOrWhiteSpace(req.Title)) return Results.BadRequest("Title is required");
 
@@ -94,6 +92,7 @@ app.MapPost("/incidents", async (AppDbContext db, CreateIncidentRequest req) =>
         Title = req.Title.Trim(),
         Description = req.Description?.Trim(),
         Severity = req.Severity,
+        Status = req.Status,
         Assignee = string.IsNullOrWhiteSpace(req.Assignee) ? null : req.Assignee!.Trim()
     };
 
@@ -106,7 +105,7 @@ app.MapPost("/incidents", async (AppDbContext db, CreateIncidentRequest req) =>
 });
 
 // Update (also sets acknowledged/resolved timestamps)
-app.MapPut("/incidents/{id:guid}", async (AppDbContext db, Guid id, UpdateIncidentRequest req) =>
+app.MapPut("/incidents/{id:guid}", async (AppDbContext db, Guid id, UpdateIncidentDto req) =>
 {
     var i = await db.Incidents.AsTracking().FirstOrDefaultAsync(x => x.Id == id);
     if (i is null) return Results.NotFound();
@@ -117,10 +116,10 @@ app.MapPut("/incidents/{id:guid}", async (AppDbContext db, Guid id, UpdateIncide
     if (req.Status.HasValue)
     {
         i.Status = req.Status.Value;
-        if (i.Status == IncidentStatus.Acknowledged && i.AcknowledgedAt is null)
-            i.AcknowledgedAt = DateTimeOffset.UtcNow;
-        if (i.Status == IncidentStatus.Resolved && i.ResolvedAt is null)
-            i.ResolvedAt = DateTimeOffset.UtcNow;
+        if (i.Status == StatusType.Acknowledged && i.AcknowledgedAt is null)
+            i.AcknowledgedAt = DateTime.UtcNow;
+        if (i.Status == StatusType.Resolved && i.ResolvedAt is null)
+            i.ResolvedAt = DateTime.UtcNow;
     }
     if (req.Assignee is not null) i.Assignee = string.IsNullOrWhiteSpace(req.Assignee) ? null : req.Assignee.Trim();
 

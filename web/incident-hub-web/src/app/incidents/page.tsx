@@ -1,112 +1,71 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { createIncident, listIncidents, type Incident } from '@/lib/api';
+import React, { useEffect, useState } from "react";
+import { Button, Spin, Typography } from "antd";
+import Link from "next/link";
+import IncidentCard, { Incident } from "@/components/IncidentCard";
+import toast, { Toaster } from "react-hot-toast";
+
+const { Title } = Typography;
 
 export default function IncidentsPage() {
-  const [items, setItems] = useState<Incident[]>([]);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    async function fetchIncidents() {
+      try {
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_API_BASE_URL}/incidents`
+        );
+        if (!res.ok) throw new Error("Failed to fetch incidents");
 
-  const [title, setTitle] = useState('');
-  const [desc, setDesc] = useState('');
-  const [severity, setSeverity] = useState<1 | 2 | 3 | 4>(2);
-  const [assignee, setAssignee] = useState('');
+        const data = await res.json();
 
-  async function load() {
-    setLoading(true);
-    setErr(null);
-    try {
-      const data = await listIncidents(1, 50);
-      setItems(data.items);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Error');
-    } finally {
-      setLoading(false);
+        console.log("logging data: ", data)
+
+        // Ensure we always set an array
+        if (Array.isArray(data)) {
+          setIncidents(data);
+        } else if (data && data.items) {
+          // if API wraps it like { incidents: [...] }
+          setIncidents(data.items);
+        } else {
+          setIncidents([]); // fallback
+        }
+      } catch (error) {
+        console.error(error);
+        toast.error("Could not load incidents");
+        setIncidents([]);
+      } finally {
+        setLoading(false);
+      }
     }
-  }
 
-  useEffect(() => { void load(); }, []);
-
-  async function onCreate(e: React.FormEvent) {
-    e.preventDefault();
-    if (!title.trim()) return;
-
-    try {
-      await createIncident({
-        title: title.trim(),
-        description: desc.trim() || undefined,
-        severity,
-        assignee: assignee.trim() || undefined,
-      });
-      setTitle(''); setDesc(''); setAssignee(''); setSeverity(2);
-      await load();
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Create failed');
-    }
-  }
+    fetchIncidents();
+  }, []);
 
   return (
-    <main className="max-w-3xl mx-auto p-6">
-      <h1 className="text-3xl font-bold">Incidents</h1>
+        <div style={{ padding: 24 }}>
+      <Title level={2}>Incidents</Title>
 
-      <form onSubmit={onCreate} className="mt-6 grid gap-3 border p-4 rounded">
-        <input
-          className="border p-2 rounded"
-          placeholder="Title *"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
-        <textarea
-          className="border p-2 rounded"
-          placeholder="Description"
-          value={desc}
-          onChange={(e) => setDesc(e.target.value)}
-        />
-        <div className="flex gap-3">
-          <label className="flex items-center gap-2">
-            Severity
-            <select
-              className="border p-2 rounded"
-              value={severity}
-              onChange={(e) => setSeverity(Number(e.target.value) as 1|2|3|4)}
-            >
-              <option value={1}>Low</option>
-              <option value={2}>Medium</option>
-              <option value={3}>High</option>
-              <option value={4}>Critical</option>
-            </select>
-          </label>
-          <input
-            className="border p-2 rounded flex-1"
-            placeholder="Assignee (optional)"
-            value={assignee}
-            onChange={(e) => setAssignee(e.target.value)}
-          />
-        </div>
-        <button className="bg-blue-600 text-white px-4 py-2 rounded self-start">Create Incident</button>
-      </form>
+      <div style={{ marginBottom: 16 }}>
+        <Link href="/incidents/new">
+          <Button type="primary">Create New Incident</Button>
+        </Link>{" "}
+        <Link href="/">
+          <Button>Back to Home</Button>
+        </Link>
+      </div>
 
-      <section className="mt-8">
-        {loading && <p>Loading…</p>}
-        {err && <p className="text-red-600">{err}</p>}
-        {!loading && !err && (
-          <ul className="grid gap-3">
-            {items.map(i => (
-              <li key={i.id} className="border p-4 rounded">
-                <div className="font-semibold">{i.title}</div>
-                <div className="text-sm text-gray-600">
-                  Severity: {['','Low','Medium','High','Critical'][i.severity]} • Status: {['','Open','Acknowledged','Resolved'][i.status]}
-                </div>
-                {i.description && <p className="mt-1 text-sm">{i.description}</p>}
-                <div className="text-xs text-gray-500 mt-1">
-                  Assignee: {i.assignee || '—'} • Created: {new Date(i.createdAt).toLocaleString()}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </main>
+      {loading ? (
+        <Spin />
+      ) : incidents.length === 0 ? (
+        <p>No incidents yet.</p>
+      ) : (
+        incidents.map((incident) => (
+          <IncidentCard key={incident.id} incident={incident} />
+        ))
+      )}
+    </div>
   );
 }
