@@ -6,8 +6,11 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ---- Database connection (Postgres in Docker) ----
-var connStr = "Host=localhost;Port=5432;Database=incidenthub;Username=incident;Password=incidentpw";
+// ---- Database connection (Postgres) ----
+// Use environment variable when deployed; fallback to local dev string
+var connStr = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
+    ?? "Host=localhost;Port=5432;Database=incidenthub;Username=incident;Password=incidentpw";
+
 builder.Services.AddDbContext<AppDbContext>(o =>
     o.UseNpgsql(connStr).UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking));
 
@@ -22,7 +25,7 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// ---- CORS (allow your Next.js dev server) ----
+// ---- CORS (allow your Next.js dev server locally) ----
 builder.Services.AddCors(o =>
 {
     o.AddPolicy("app", p =>
@@ -36,16 +39,19 @@ builder.Services.AddCors(o =>
 
 var app = builder.Build();
 
+// ---- Ensure we listen on Render's dynamic PORT ----
+var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
+app.Urls.Add($"http://*:{port}");
+
 // ---- Middleware ----
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "IncidentHub API v1");
-    c.RoutePrefix = "swagger"; // so UI is at /swagger
+    c.RoutePrefix = "swagger";
 });
 
-// Keep dev simple: stay on HTTP to avoid the HTTPS warning
-// app.UseHttpsRedirection();
+// app.UseHttpsRedirection(); // skip for now to avoid issues in container
 
 app.UseCors("app");
 
@@ -53,7 +59,7 @@ app.MapGet("/", () => Results.Redirect("/swagger"));
 
 // ---------------- Incidents CRUD ----------------
 
-// List incidents with optional filters + paging (simple version)
+// List incidents with optional filters + paging
 app.MapGet("/incidents", async (AppDbContext db, int page = 1, int pageSize = 20) =>
 {
     if (page < 1) page = 1;
@@ -96,7 +102,6 @@ app.MapPost("/incidents", async (AppDbContext db, CreateIncidentDto req) =>
         Assignee = string.IsNullOrWhiteSpace(req.Assignee) ? null : req.Assignee!.Trim()
     };
 
-    // Since we used NoTracking globally, ensure we track this new entity
     db.ChangeTracker.Clear();
     db.Incidents.Add(entity);
     await db.SaveChangesAsync();
@@ -104,7 +109,7 @@ app.MapPost("/incidents", async (AppDbContext db, CreateIncidentDto req) =>
     return Results.Created($"/incidents/{entity.Id}", new { id = entity.Id });
 });
 
-// Update (also sets acknowledged/resolved timestamps)
+// Update (sets acknowledged/resolved timestamps)
 app.MapPut("/incidents/{id:guid}", async (AppDbContext db, Guid id, UpdateIncidentDto req) =>
 {
     var i = await db.Incidents.AsTracking().FirstOrDefaultAsync(x => x.Id == id);
