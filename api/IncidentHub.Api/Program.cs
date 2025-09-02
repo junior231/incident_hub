@@ -32,11 +32,9 @@ catch (Exception ex)
 builder.Services.AddDbContext<AppDbContext>(o =>
     o.UseNpgsql(connStr, npgsqlOptions =>
     {
-        // Optionally set keepalive so Render/Supabase connections stay alive
         npgsqlOptions.CommandTimeout(30);
     }).UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking));
 
-// ---- Swagger (API docs) ----
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -65,6 +63,21 @@ var app = builder.Build();
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 app.Urls.Add($"http://*:{port}");
 
+// ---- Apply EF Core migrations automatically ----
+using (var scope = app.Services.CreateScope())
+{
+    try
+    {
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.Database.Migrate();
+        Console.WriteLine("[MIGRATIONS] Applied successfully");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[MIGRATIONS] Failed: {ex}");
+    }
+}
+
 // ---- Middleware ----
 app.UseSwagger();
 app.UseSwaggerUI(c =>
@@ -82,84 +95,124 @@ app.MapGet("/", () => Results.Redirect("/swagger"));
 // List incidents with optional filters + paging
 app.MapGet("/incidents", async (AppDbContext db, int page = 1, int pageSize = 20) =>
 {
-    if (page < 1) page = 1;
-    if (pageSize is < 1 or > 100) pageSize = 20;
+    try
+    {
+        if (page < 1) page = 1;
+        if (pageSize is < 1 or > 100) pageSize = 20;
 
-    var q = db.Incidents.AsQueryable()
-        .OrderByDescending(i => i.CreatedAt);
+        var q = db.Incidents.AsQueryable()
+            .OrderByDescending(i => i.CreatedAt);
 
-    var total = await q.CountAsync();
-    var items = await q.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
+        var total = await q.CountAsync();
+        var items = await q.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
 
-    var dtos = items.Select(i => new IncidentDto(
-        i.Id, i.Title, i.Description, i.Severity, i.Status,
-        i.Assignee, i.CreatedAt, i.AcknowledgedAt, i.ResolvedAt));
+        var dtos = items.Select(i => new IncidentDto(
+            i.Id, i.Title, i.Description, i.Severity, i.Status,
+            i.Assignee, i.CreatedAt, i.AcknowledgedAt, i.ResolvedAt));
 
-    return Results.Ok(new { total, page, pageSize, items = dtos });
+        return Results.Ok(new { total, page, pageSize, items = dtos });
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[ERROR] GET /incidents failed: {ex}");
+        return Results.Problem("Internal server error, check logs for details.");
+    }
 });
 
 // Get one
 app.MapGet("/incidents/{id:guid}", async (AppDbContext db, Guid id) =>
 {
-    var i = await db.Incidents.FindAsync(id);
-    return i is null
-        ? Results.NotFound()
-        : Results.Ok(new IncidentDto(i.Id, i.Title, i.Description, i.Severity, i.Status,
-            i.Assignee, i.CreatedAt, i.AcknowledgedAt, i.ResolvedAt));
+    try
+    {
+        var i = await db.Incidents.FindAsync(id);
+        return i is null
+            ? Results.NotFound()
+            : Results.Ok(new IncidentDto(i.Id, i.Title, i.Description, i.Severity, i.Status,
+                i.Assignee, i.CreatedAt, i.AcknowledgedAt, i.ResolvedAt));
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[ERROR] GET /incidents/{{id}} failed: {ex}");
+        return Results.Problem("Internal server error, check logs for details.");
+    }
 });
 
 // Create
 app.MapPost("/incidents", async (AppDbContext db, CreateIncidentDto req) =>
 {
-    if (string.IsNullOrWhiteSpace(req.Title)) return Results.BadRequest("Title is required");
-
-    var entity = new Incident
+    try
     {
-        Title = req.Title.Trim(),
-        Description = req.Description?.Trim(),
-        Severity = req.Severity,
-        Status = req.Status,
-        Assignee = string.IsNullOrWhiteSpace(req.Assignee) ? null : req.Assignee!.Trim()
-    };
+        if (string.IsNullOrWhiteSpace(req.Title)) return Results.BadRequest("Title is required");
 
-    db.ChangeTracker.Clear();
-    db.Incidents.Add(entity);
-    await db.SaveChangesAsync();
+        var entity = new Incident
+        {
+            Title = req.Title.Trim(),
+            Description = req.Description?.Trim(),
+            Severity = req.Severity,
+            Status = req.Status,
+            Assignee = string.IsNullOrWhiteSpace(req.Assignee) ? null : req.Assignee!.Trim()
+        };
 
-    return Results.Created($"/incidents/{entity.Id}", new { id = entity.Id });
+        db.ChangeTracker.Clear();
+        db.Incidents.Add(entity);
+        await db.SaveChangesAsync();
+
+        return Results.Created($"/incidents/{entity.Id}", new { id = entity.Id });
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[ERROR] POST /incidents failed: {ex}");
+        return Results.Problem("Internal server error, check logs for details.");
+    }
 });
 
-// Update (sets acknowledged/resolved timestamps)
+// Update
 app.MapPut("/incidents/{id:guid}", async (AppDbContext db, Guid id, UpdateIncidentDto req) =>
 {
-    var i = await db.Incidents.AsTracking().FirstOrDefaultAsync(x => x.Id == id);
-    if (i is null) return Results.NotFound();
-
-    if (req.Title is not null) i.Title = req.Title.Trim();
-    if (req.Description is not null) i.Description = req.Description.Trim();
-    if (req.Severity.HasValue) i.Severity = req.Severity.Value;
-    if (req.Status.HasValue)
+    try
     {
-        i.Status = req.Status.Value;
-        if (i.Status == StatusType.Acknowledged && i.AcknowledgedAt is null)
-            i.AcknowledgedAt = DateTime.UtcNow;
-        if (i.Status == StatusType.Resolved && i.ResolvedAt is null)
-            i.ResolvedAt = DateTime.UtcNow;
-    }
-    if (req.Assignee is not null) i.Assignee = string.IsNullOrWhiteSpace(req.Assignee) ? null : req.Assignee.Trim();
+        var i = await db.Incidents.AsTracking().FirstOrDefaultAsync(x => x.Id == id);
+        if (i is null) return Results.NotFound();
 
-    await db.SaveChangesAsync();
-    return Results.NoContent();
+        if (req.Title is not null) i.Title = req.Title.Trim();
+        if (req.Description is not null) i.Description = req.Description.Trim();
+        if (req.Severity.HasValue) i.Severity = req.Severity.Value;
+        if (req.Status.HasValue)
+        {
+            i.Status = req.Status.Value;
+            if (i.Status == StatusType.Acknowledged && i.AcknowledgedAt is null)
+                i.AcknowledgedAt = DateTime.UtcNow;
+            if (i.Status == StatusType.Resolved && i.ResolvedAt is null)
+                i.ResolvedAt = DateTime.UtcNow;
+        }
+        if (req.Assignee is not null) i.Assignee = string.IsNullOrWhiteSpace(req.Assignee) ? null : req.Assignee.Trim();
+
+        await db.SaveChangesAsync();
+        return Results.NoContent();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[ERROR] PUT /incidents/{{id}} failed: {ex}");
+        return Results.Problem("Internal server error, check logs for details.");
+    }
 });
 
 // Delete
 app.MapDelete("/incidents/{id:guid}", async (AppDbContext db, Guid id) =>
 {
-    var i = await db.Incidents.FindAsync(id);
-    if (i is null) return Results.NotFound();
-    db.Remove(i);
-    await db.SaveChangesAsync();
-    return Results.NoContent();
+    try
+    {
+        var i = await db.Incidents.FindAsync(id);
+        if (i is null) return Results.NotFound();
+        db.Remove(i);
+        await db.SaveChangesAsync();
+        return Results.NoContent();
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"[ERROR] DELETE /incidents/{{id}} failed: {ex}");
+        return Results.Problem("Internal server error, check logs for details.");
+    }
 });
 
 app.Run();
