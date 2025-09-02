@@ -14,4 +14,10 @@ RUN dotnet publish "IncidentHub.Api.csproj" -c Release -o /app/publish
 FROM base AS final
 WORKDIR /app
 COPY --from=build /app/publish .
-ENTRYPOINT ["dotnet", "IncidentHub.Api.dll"]
+
+# Copy entrypoint script
+COPY entrypoint.sh .
+RUN chmod +x ./entrypoint.sh
+
+# Use entrypoint script instead of running directly
+ENTRYPOINT ["./entrypoint.sh"]

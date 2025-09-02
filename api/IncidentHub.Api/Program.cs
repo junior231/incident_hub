@@ -11,8 +11,30 @@ var builder = WebApplication.CreateBuilder(args);
 var connStr = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
     ?? "Host=localhost;Port=5432;Database=incidenthub;Username=incident;Password=incidentpw";
 
+// Log connection string (masking password) for debugging
+try
+{
+    var safeLog = connStr;
+    if (safeLog.Contains("Password="))
+    {
+        var parts = safeLog.Split(';')
+            .Select(p => p.StartsWith("Password=", StringComparison.OrdinalIgnoreCase) ? "Password=***" : p);
+        safeLog = string.Join(";", parts);
+    }
+    Console.WriteLine($"[DB CONFIG] Using connection string: {safeLog}");
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"[DB CONFIG] Failed to parse connection string for logging: {ex.Message}");
+}
+
+// Configure EF with Npgsql
 builder.Services.AddDbContext<AppDbContext>(o =>
-    o.UseNpgsql(connStr).UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking));
+    o.UseNpgsql(connStr, npgsqlOptions =>
+    {
+        // Optionally set keepalive so Render/Supabase connections stay alive
+        npgsqlOptions.CommandTimeout(30);
+    }).UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking));
 
 // ---- Swagger (API docs) ----
 builder.Services.AddEndpointsApiExplorer();
@@ -50,8 +72,6 @@ app.UseSwaggerUI(c =>
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "IncidentHub API v1");
     c.RoutePrefix = "swagger";
 });
-
-// app.UseHttpsRedirection(); // skip for now to avoid issues in container
 
 app.UseCors("app");
 
