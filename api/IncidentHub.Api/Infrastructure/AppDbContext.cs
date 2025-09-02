@@ -11,6 +11,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     {
         b.Entity<Incident>(e =>
         {
+            // Explicitly map to the "Incidents" table (case-sensitive in Postgres)
+            e.ToTable("Incidents");
+
             e.HasKey(x => x.Id);
             e.Property(x => x.Title).IsRequired().HasMaxLength(240);
             e.Property(x => x.Description).HasMaxLength(4000);

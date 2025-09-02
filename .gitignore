@@ -29,3 +29,6 @@ yarn-error.log*
 # OS junk
 .DS_Store
 Thumbs.db
+
+#json
+appsettings.*.json
