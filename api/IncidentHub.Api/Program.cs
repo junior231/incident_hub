@@ -10,7 +10,7 @@ var builder = WebApplication.CreateBuilder(args);
 var connStr = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
     ?? "Host=localhost;Port=5432;Database=incidenthub;Username=incident;Password=incidentpw";
 
-// Log connection string (masking password) for debugging
+// Log connection string (masking password)
 try
 {
     var safeLog = connStr;
@@ -27,14 +27,24 @@ catch (Exception ex)
     Console.WriteLine($"[DB CONFIG] Failed to parse connection string for logging: {ex.Message}");
 }
 
-// Configure EF with Npgsql
+// ---- EF Core with Npgsql ----
 builder.Services.AddDbContext<AppDbContext>(o =>
     o.UseNpgsql(connStr, npgsqlOptions =>
     {
-        npgsqlOptions.CommandTimeout(30);
-        npgsqlOptions.EnableRetryOnFailure(5, TimeSpan.FromSeconds(10), null);
-    }).UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking));
+        // Default 30s can hang; keep aggressive so failures bubble fast
+        npgsqlOptions.CommandTimeout(15);
 
+        // Retry transient network issues automatically
+        npgsqlOptions.EnableRetryOnFailure(
+            maxRetryCount: 5,
+            maxRetryDelay: TimeSpan.FromSeconds(5),
+            errorCodesToAdd: null
+        );
+    })
+    // No-tracking reads by default = faster queries
+    .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking));
+
+// ---- Swagger ----
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -49,29 +59,34 @@ builder.Services.AddSwaggerGen(c =>
 builder.Services.AddCors(o =>
 {
     o.AddPolicy("app", p =>
-        p.WithOrigins("http://localhost:3000", "http://127.0.0.1:3000", "https://incident-hub-ui.vercel.app")
-         .AllowAnyHeader()
-         .AllowAnyMethod());
+        p.WithOrigins(
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "https://incident-hub-ui.vercel.app"
+        )
+        .AllowAnyHeader()
+        .AllowAnyMethod());
 });
 
 var app = builder.Build();
 
-// ---- Ensure we listen on Render's dynamic PORT ----
+// ---- Listen on Render's dynamic PORT ----
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 app.Urls.Add($"http://*:{port}");
 
-// ---- Apply EF Core migrations automatically ----
+// ---- Apply EF Core migrations ----
 using (var scope = app.Services.CreateScope())
 {
     try
     {
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Console.WriteLine("[MIGRATIONS] Checking database migrations...");
         db.Database.Migrate();
-        Console.WriteLine("[MIGRATIONS] Applied successfully");
+        Console.WriteLine("[MIGRATIONS] Applied successfully ✅");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"[MIGRATIONS] Failed: {ex}");
+        Console.Error.WriteLine($"[MIGRATIONS] Failed ❌: {ex}");
     }
 }
 
