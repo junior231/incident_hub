@@ -21,8 +21,6 @@ export default function IncidentsPage() {
 
         const data = await res.json();
 
-        console.log("logging data: ", data)
-
         // Ensure we always set an array
         if (Array.isArray(data)) {
           setIncidents(data);
