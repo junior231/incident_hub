@@ -7,7 +7,6 @@ using Microsoft.OpenApi.Models;
 var builder = WebApplication.CreateBuilder(args);
 
 // ---- Database connection (Postgres) ----
-// Use environment variable when deployed; fallback to local dev string
 var connStr = Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
     ?? "Host=localhost;Port=5432;Database=incidenthub;Username=incident;Password=incidentpw";
 
@@ -33,6 +32,7 @@ builder.Services.AddDbContext<AppDbContext>(o =>
     o.UseNpgsql(connStr, npgsqlOptions =>
     {
         npgsqlOptions.CommandTimeout(30);
+        npgsqlOptions.EnableRetryOnFailure(5, TimeSpan.FromSeconds(10), null);
     }).UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking));
 
 builder.Services.AddEndpointsApiExplorer();
@@ -45,16 +45,13 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// ---- CORS (allow your Next.js dev server locally) ----
+// ---- CORS ----
 builder.Services.AddCors(o =>
 {
     o.AddPolicy("app", p =>
-        p.WithOrigins(
-            "http://localhost:3000",
-            "http://127.0.0.1:3000"
-        )
-        .AllowAnyHeader()
-        .AllowAnyMethod());
+        p.WithOrigins("http://localhost:3000", "http://127.0.0.1:3000")
+         .AllowAnyHeader()
+         .AllowAnyMethod());
 });
 
 var app = builder.Build();
@@ -91,8 +88,6 @@ app.UseCors("app");
 app.MapGet("/", () => Results.Redirect("/swagger"));
 
 // ---------------- Incidents CRUD ----------------
-
-// List incidents with optional filters + paging
 app.MapGet("/incidents", async (AppDbContext db, int page = 1, int pageSize = 20) =>
 {
     try
@@ -100,8 +95,7 @@ app.MapGet("/incidents", async (AppDbContext db, int page = 1, int pageSize = 20
         if (page < 1) page = 1;
         if (pageSize is < 1 or > 100) pageSize = 20;
 
-        var q = db.Incidents.AsQueryable()
-            .OrderByDescending(i => i.CreatedAt);
+        var q = db.Incidents.AsQueryable().OrderByDescending(i => i.CreatedAt);
 
         var total = await q.CountAsync();
         var items = await q.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
@@ -119,7 +113,6 @@ app.MapGet("/incidents", async (AppDbContext db, int page = 1, int pageSize = 20
     }
 });
 
-// Get one
 app.MapGet("/incidents/{id:guid}", async (AppDbContext db, Guid id) =>
 {
     try
@@ -137,7 +130,6 @@ app.MapGet("/incidents/{id:guid}", async (AppDbContext db, Guid id) =>
     }
 });
 
-// Create
 app.MapPost("/incidents", async (AppDbContext db, CreateIncidentDto req) =>
 {
     try
@@ -166,7 +158,6 @@ app.MapPost("/incidents", async (AppDbContext db, CreateIncidentDto req) =>
     }
 });
 
-// Update
 app.MapPut("/incidents/{id:guid}", async (AppDbContext db, Guid id, UpdateIncidentDto req) =>
 {
     try
@@ -197,7 +188,6 @@ app.MapPut("/incidents/{id:guid}", async (AppDbContext db, Guid id, UpdateIncide
     }
 });
 
-// Delete
 app.MapDelete("/incidents/{id:guid}", async (AppDbContext db, Guid id) =>
 {
     try
